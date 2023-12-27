@@ -1,63 +1,66 @@
-# Выполнить скрейпинг данных в веб-сайта http://books.toscrape.com/ 
-# и извлечь информацию о всех книгах на сайте во всех категориях: 
-# название, цену, количество товара в наличии (In stock (19 available)) в формате integer, описание.
-# Затем сохранить эту информацию в JSON-файле.    
-
 import requests
-import bs4
-import pandas as pd
+from bs4 import BeautifulSoup
+import json
+
+# Функция для получения информации о книгах на странице
+import requests
+from bs4 import BeautifulSoup
+
+def get_books_data(url):
+    response = requests.get(url)
+    soup = BeautifulSoup(response.content, 'html.parser')
+    books = []
+    book_elements = soup.find_all('article', class_='product_pod')
+    for element in book_elements:
+        title = element.h3.a['title']
+        price = float(element.find('p', class_='price_color').text[1:].replace('£', '')) # обработка валюты
+        
+        # Получить ссылку на страницу с описанием товара
+        description_link = element.find('h3').a['href']
+        description_url = url.replace('index.html', '') + description_link
+        
+        # Сделать запрос на страницу с описанием товара
+        description_response = requests.get(description_url)
+        description_soup = BeautifulSoup(description_response.content, 'html.parser')
+        
+        # Получить информацию о наличии товара
+        stock_text = description_soup.find('p', class_='instock availability').text.strip()
+        # Можно добавить дополнительные проверки на наличие цифр в stock_text
+        in_stock = int(''.join(filter(str.isdigit, stock_text))) if any(char.isdigit() for char in stock_text) else 0
+
+        # Получить описание товара
+        description = description_soup.find('article', class_='product_page').find_all('p')[3].text
+
+        book = {
+            'title': title,
+            'price': price,
+            'in_stock': in_stock,
+            'description': description
+        }
+        books.append(book)
+        
+    return books
+
+# Функция для получения информации о книгах во всех категориях
+def scrape_books():
+    main_url = 'http://books.toscrape.com/'
+    response = requests.get(main_url)
+    soup = BeautifulSoup(response.content, 'html.parser')
+    categories = soup.find('ul', class_='nav').find_all('li')
+
+    all_books = []
+    for category in categories:
+        category_link = category.a['href']
+        category_url = main_url + category_link
+        books_data = get_books_data(category_url)
+        all_books.extend(books_data)
+
+    return all_books
 
 
-def scrape_and_save_pages(start_page, end_page):
-    all_data = []
+# Вызываем функцию для скрейпинга книг
+books = scrape_books()
 
-    for i in range(start_page, end_page + 1):
-        pages = []
-        prices = []
-        ratings = []
-        title = []
-        urls = []
-
-        url = "https://books.toscrape.com/catalogue/page-{}.html".format(i)
-        pages.append(url)
-
-        for item in pages:
-            page = requests.get(item)
-            soup = bs4.BeautifulSoup(page.text, "html.parser")
-
-            for t in soup.find_all("h3"):
-                titless = t.getText()
-                title.append(titless)
-
-            for p in soup.find_all("p", class_="price_color"):
-                price = p.getText()
-                prices.append(price)
-
-            for s in soup.find_all("p", class_="star-rating"):
-                for k, v in s.attrs.items():
-                    star = v[1]
-                    ratings.append(star)
-
-            divs = soup.find_all("div", class_="image_container")
-
-            for thumbs in divs:
-                tagss = thumbs.find("img", class_="thumbnail")
-                links = "http://books.toscrape.com/" + str(tagss["src"])
-                newlinks = links.replace("..", "")
-                urls.append(newlinks)
-
-        web_data = {"Title": title, "Prices": prices, "Ratings": ratings, "URL": urls}
-
-        data = pd.DataFrame(web_data)
-        all_data.append(data)
-
-    # Объединяем все данные
-    combined_data = pd.concat(all_data, ignore_index=True)
-
-    # Сохраняем объединенные данные в JSON
-    combined_data.to_json('books.json')
-
-# Запуск:
-scrape_and_save_pages(1, 50)
-
-
+# Сохраняем информацию в JSON-файле
+with open('books_data.json', 'w', encoding='utf-8') as file:
+    json.dump(books, file, ensure_ascii=False, indent=4)
